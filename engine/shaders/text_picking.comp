@@ -1,0 +1,68 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+struct BoundingBox {
+    vec4 rect;    // x, y, width, height
+    uint elementId;
+};
+
+layout(std430, binding = 0) buffer BBoxes {
+    BoundingBox boxes[];
+};
+
+layout(std430, binding = 1) buffer Result {
+    uint pickedId;
+    float minDistance;
+};
+
+layout(std140, binding = 2) uniform RayData {
+    vec2 rayOrigin;
+    vec2 rayDirection;
+} ray;
+
+bool rayIntersectsBox(vec2 origin, vec2 dir, vec4 box, out float distance) {
+    vec2 boxMin = box.xy;
+    vec2 boxMax = box.xy + box.zw;
+    
+    vec2 invDir = 1.0 / dir;
+    vec2 t1 = (boxMin - origin) * invDir;
+    vec2 t2 = (boxMax - origin) * invDir;
+    
+    vec2 tMin = min(t1, t2);
+    vec2 tMax = max(t1, t2);
+    
+    float tNear = max(tMin.x, tMin.y);
+    float tFar = min(tMax.x, tMax.y);
+    
+    if (tNear > tFar || tFar < 0.0) {
+        distance = 1e38;
+        return false;
+    }
+    
+    distance = tNear;
+    return true;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    
+    // Initialize results in first invocation
+    if (idx == 0) {
+        pickedId = 0xFFFFFFFF;
+        minDistance = 1e38;
+    }
+    
+    barrier();
+    
+    // Process this box if we're within bounds
+    if (idx < boxes.length()) {
+        float dist;
+        if (rayIntersectsBox(ray.rayOrigin, ray.rayDirection, boxes[idx].rect, dist)) {
+            if (dist < minDistance) {
+                minDistance = dist;
+                pickedId = boxes[idx].elementId;
+            }
+        }
+    }
+}

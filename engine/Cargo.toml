@@ -1,0 +1,40 @@
+[package]
+name = "ashengine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ash = "0.37"
+ash-window = "0.12"
+raw-window-handle = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+lazy_static = "1.4"
+toml = "0.8.20"
+winit = "0.28"
+notify = "6.1"
+env_logger = "0.10"
+log = "0.4"
+thiserror = "1.0"
+pretty_env_logger = "0.5"
+bytemuck = { version = "1.13", features = ["derive"] }
+memoffset = "0.9"
+fontdue = "0.7"
+glam = "0.24"
+gltf = "1.5"
+chrono = "0.4"
+serde_json = "1.0"
+
+[build-dependencies]
+shaderc = "0.8"
+
+[lib]
+name = "ashengine"
+path = "src/lib.rs"
+
+[[example]]
+name = "text_blocks"
+path = "examples/text_blocks.rs"
+
+[[example]]
+name = "text_config_usage"
+path = "examples/text_config_usage.rs"

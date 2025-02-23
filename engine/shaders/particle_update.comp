@@ -1,0 +1,121 @@
+#version 450
+
+layout(constant_id = 0) const int local_size_x = 256;
+layout(constant_id = 1) const int local_size_y = 1;
+layout(constant_id = 2) const int local_size_z = 1;
+
+struct Particle {
+    vec4 position;
+    vec4 velocity;
+};
+
+struct PushConstants {
+    float deltaTime;
+    float maxVelocity;
+    vec2 bounds; // x: min, y: max
+};
+
+layout(std430, binding = 0) buffer ParticleBufferIn {
+    Particle particles[];
+} input_data;
+
+layout(std430, binding = 1) buffer ParticleBufferOut {
+    Particle particles[];
+} output_data;
+
+layout(push_constant) uniform pc {
+    PushConstants params;
+};
+
+#ifdef DEBUG
+#extension GL_EXT_debug_printf : require
+#endif
+
+// Shared memory for coalesced memory access
+shared Particle shared_particles[32];
+
+void main() {
+    uint global_idx = gl_GlobalInvocationID.x;
+    uint local_idx = gl_LocalInvocationID.x;
+    uint group_id = gl_WorkGroupID.x;
+
+    // Early exit for threads beyond particle count
+    if (global_idx >= input_data.particles.length()) return;
+
+#ifdef DEBUG
+    debugPrintfEXT("Thread %d: Entered main function (Workgroup size: %d, %d, %d)\n", global_idx, gl_WorkGroupSize.x, gl_WorkGroupSize.y, gl_WorkGroupSize.z);
+#endif
+
+    // Load data into shared memory for the first 32 threads in each workgroup
+    if (local_idx < 32) {
+        uint shared_idx = group_id * 32 + local_idx;
+        if (shared_idx < input_data.particles.length()) {
+            shared_particles[local_idx] = input_data.particles[shared_idx];
+        }
+    }
+
+    // Ensure all threads have loaded their data
+    barrier();
+    memoryBarrierShared();
+
+    // Read particle data (either from shared memory or global memory)
+    Particle particle;
+    if (local_idx < 32) {
+        particle = shared_particles[local_idx];
+    } else {
+        particle = input_data.particles[global_idx];
+    }
+
+    vec3 pos = particle.position.xyz;
+    vec3 vel = particle.velocity.xyz;
+
+#ifdef DEBUG
+    debugPrintfEXT("Thread %d: Position (%.2f, %.2f, %.2f), Velocity (%.2f, %.2f, %.2f)\n", global_idx, pos.x, pos.y, pos.z, vel.x, vel.y, vel.z);
+#endif
+
+    // Update position based on velocity
+    pos += vel * params.deltaTime;
+
+    // Apply simple boundary conditions with vectorized operations
+    bvec3 below_min = lessThan(pos, vec3(params.bounds.x));
+    bvec3 above_max = greaterThan(pos, vec3(params.bounds.y));
+
+    // Clamp positions and reflect velocities
+    if (below_min.x) {
+        pos.x = params.bounds.x;
+        vel.x = abs(vel.x);
+    } else if (above_max.x) {
+        pos.x = params.bounds.y;
+        vel.x = -abs(vel.x);
+    }
+
+    if (below_min.y) {
+        pos.y = params.bounds.x;
+        vel.y = abs(vel.y);
+    } else if (above_max.y) {
+        pos.y = params.bounds.y;
+        vel.y = -abs(vel.y);
+    }
+
+    if (below_min.z) {
+        pos.z = params.bounds.x;
+        vel.z = abs(vel.z);
+    } else if (above_max.z) {
+        pos.z = params.bounds.y;
+        vel.z = -abs(vel.z);
+    }
+
+    // Clamp velocity using vector operations
+    float speed = length(vel);
+    if (speed > params.maxVelocity) {
+        vel = normalize(vel) * params.maxVelocity;
+    }
+
+#ifdef DEBUG
+    debugPrintfEXT("Thread %d: Updated Position (%.2f, %.2f, %.2f), Updated Velocity (%.2f, %.2f, %.2f)\n", global_idx, pos.x, pos.y, pos.z, vel.x, vel.y, vel.z);
+#endif
+
+    // Write results back to output buffer
+    output_data.particles[global_idx].position = vec4(pos, 1.0);
+    output_data.particles[global_idx].velocity = vec4(vel, 0.0);
+}

@@ -1,0 +1,5 @@
+# Engine configuration
+
+[engine]
+physics_enabled = false
+lighting_enabled = false
